@@ -58,8 +58,8 @@ npm run build && npm run start   # production
 
 | Role | Username | Password |
 |---|---|---|
-| Player | `demo` | `demo1234` |
-| Admin (Admin panel in Member tab) | `admin` | `admin1234` |
+| Player | `null` | `null` |
+| Admin (Admin panel in Member tab) | `null` | `null` |
 
 ---
 

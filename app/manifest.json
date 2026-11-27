@@ -1,0 +1,28 @@
+{
+  "id": "/",
+  "name": "100LUCK — ১০০ লাক ক্যাসিনো",
+  "short_name": "100LUCK",
+  "description": "100LUCK (১০০ লাক) — online casino for Bangladesh. Slots, live casino, Aviator, bKash/Nagad/Upay deposits.",
+  "lang": "bn",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "categories": ["games", "entertainment"],
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "/brand/app/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/app/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/app/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/brand/app/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Deposit", "short_name": "Deposit", "url": "/deposit", "icons": [{ "src": "/brand/app/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Prizes", "short_name": "Prizes", "url": "/prizes", "icons": [{ "src": "/brand/app/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Support", "short_name": "Support", "url": "/member/support", "icons": [{ "src": "/brand/app/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

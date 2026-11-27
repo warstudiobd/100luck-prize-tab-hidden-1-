@@ -1,0 +1,5 @@
+rewards-invite v20
+
+Wallet callback (seamless): https://sonali7-casino.vercel.app/api/wallet/callback
+Aliases: /api/wallet/seamless /api/wallet/webhook /api/webhook/seamless
+Deposit gateway return + IPN: https://sonali7-casino.vercel.app/api/deposit/gateway/callback

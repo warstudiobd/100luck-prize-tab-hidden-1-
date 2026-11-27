@@ -1,0 +1,9 @@
+{
+  "schedules": {
+    "weekly-db-check": {
+      "schedule": "0 4 * * 1",
+      "path": "/api/cron/backup",
+      "requestMethod": "GET"
+    }
+  }
+}

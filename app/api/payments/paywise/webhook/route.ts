@@ -145,6 +145,8 @@ const REF_PATHS = [
   "merchant_reference", "data.merchant_reference",
   "transaction_request.merchant_order_id", "merchant_order_id",
   "trx_ref", "data.trx_ref", "order_id", "data.order_id",
+  // PayWise withdrawal callbacks identify the payout with data.reference (PWD…).
+  "data.reference", "reference",
 ];
 
 /** Status, from either the event name or the status field. */

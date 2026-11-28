@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
 /** One payout number per gateway: bKash, Nagad, Upay — no second number, ever. */
 export const MAX_ACCOUNTS_PER_CHANNEL = 1;
 
-type Row = { id: number; channel: string; account_number: string; is_primary: boolean; created_at: string };
+type Row = { id: number; channel: string; account_number: string; account_holder?: string | null; is_primary: boolean; created_at: string };
 
 /** 01711234593 → 01711••••593 (keep the first 5 and last 3 digits). */
 export function maskNumber(n: string): string {
@@ -78,11 +78,15 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const channel = String(body.channel ?? "").trim().slice(0, 16);
   const number = String(body.account_number ?? "").replace(/\D/g, "").slice(0, 11);
+  const accountHolder = String(body.account_holder ?? "").trim().replace(/\s+/g, " ").slice(0, 100);
   const makePrimary = body.primary === true;
   /** Second lock: a payout wallet cannot be added without the player's withdrawal PIN. */
   const pin = String(body.pin ?? "").trim();
 
   if (!channel) return NextResponse.json({ ok: false, error: "channel is required" }, { status: 400 });
+  if (["bKash", "Nagad"].includes(channel) && accountHolder.length < 2) {
+    return NextResponse.json({ ok: false, error: "account holder name is required for automatic payout" }, { status: 400 });
+  }
   if (!/^01[3-9]\d{8}$/.test(number)) {
     return NextResponse.json({ ok: false, error: "enter a valid BD wallet number (01XXXXXXXXX)" }, { status: 400 });
   }
@@ -160,9 +164,9 @@ export async function POST(req: NextRequest) {
   let inserted;
   try {
     inserted = await query(
-      `INSERT INTO payout_accounts (user_id, channel, account_number, is_primary)
-       VALUES ($1, $2, $3, $4) RETURNING id, channel, account_number, is_primary, created_at`,
-      [sess.sub, channel, number, primary]
+      `INSERT INTO payout_accounts (user_id, channel, account_number, account_holder, is_primary)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id, channel, account_number, account_holder, is_primary, created_at`,
+      [sess.sub, channel, number, accountHolder || null, primary]
     );
   } catch (e) {
     // Unique index from 2026-11-25-payout-account-rules.sql: two requests racing for the

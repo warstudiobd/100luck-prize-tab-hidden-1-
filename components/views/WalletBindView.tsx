@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, Loader2, Lock, Plus, ShieldCheck, Star, Trash2, Wallet } from "lucide-react";
 import { useLang } from "../lang";
 
-type Account = { id: number; channel: string; masked: string; last4: string; is_primary: boolean; created_at: string };
+type Account = { id: number; channel: string; masked: string; last4: string; is_primary: boolean; created_at: string; has_account_holder?: boolean };
 type Channel = { id: string; logo: string; color: string; label: string; min_amount_cents: number; max_amount_cents: number };
 
 const FALLBACK: Channel[] = [
@@ -44,6 +44,7 @@ export default function WalletBindView({ showToast, onBack }: {
   const [maxPer, setMaxPer] = useState(4);
   const [number, setNumber] = useState("");
   const [accountHolder, setAccountHolder] = useState("");
+  const [holderPin, setHolderPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [justAdded, setJustAdded] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,6 +98,22 @@ export default function WalletBindView({ showToast, onBack }: {
   const locked = mine.length >= maxPer;
   const atLimit = locked;
   const valid = /^01[3-9]\d{8}$/.test(number);
+
+  async function saveExistingHolder(id: number) {
+    if (accountHolder.trim().length < 2) return showToast(T("Enter the name registered to this wallet", "ওয়ালেটে নিবন্ধিত নাম লিখুন"));
+    if (!/^\d{4,6}$/.test(holderPin)) return showToast(T("Enter your withdrawal PIN", "উত্তোলন পিন দিন"));
+    setBusy(true);
+    try {
+      const r = await fetch("/api/cashier/accounts", {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "set_holder", id, account_holder: accountHolder, pin: holderPin }),
+      }).then(r => r.json()).catch(() => null);
+      if (!r?.ok) return showToast(r?.error || T("Could not save wallet name", "ওয়ালেটের নাম সংরক্ষণ হয়নি"));
+      setAccountHolder(""); setHolderPin("");
+      await load();
+      showToast(T("Wallet account-holder name saved", "ওয়ালেট অ্যাকাউন্টধারীর নাম সংরক্ষিত হয়েছে"));
+    } finally { setBusy(false); }
+  }
 
   async function add() {
     if (!valid) return showToast(T("Enter a valid 11-digit wallet number", "সঠিক ১১ ডিজিটের ওয়ালেট নম্বর দিন"));
@@ -194,6 +211,21 @@ export default function WalletBindView({ showToast, onBack }: {
                 <ShieldCheck size={12} /> {T("Wallet locked", "ওয়ালেট লক করা আছে")}
               </p>
               <p className="mt-1 text-[17px] font-black tabular-nums tracking-[.14em] text-white">{mine[0]?.masked}</p>
+              {(["bKash", "Nagad"].includes(group) && mine[0] && !mine[0].has_account_holder) && <div className="mt-2 rounded-xl border border-amber-400/25 bg-amber-400/[.06] p-2.5">
+                <p className="text-[9px] leading-snug text-amber-200/80">{T("Add the name registered to this wallet to enable automated payouts. Your bound number stays unchanged.", "স্বয়ংক্রিয় উত্তোলনের জন্য ওয়ালেটে নিবন্ধিত নাম যোগ করুন। বাঁধা নম্বর অপরিবর্তিত থাকবে।")}</p>
+                <input value={accountHolder} onChange={e => setAccountHolder(e.target.value.slice(0, 100))}
+                  autoComplete="name" placeholder={T("Wallet account-holder name", "ওয়ালেট অ্যাকাউন্টধারীর নাম")}
+                  className="mt-2 h-10 w-full rounded-lg border border-white/12 bg-black/45 px-3 text-[12px] text-white placeholder:text-[10px] placeholder:text-white/25" />
+                <input value={holderPin} onChange={e => setHolderPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  inputMode="numeric" type="password" autoComplete="current-password" maxLength={6}
+                  placeholder={T("Withdrawal PIN", "উত্তোলন পিন")}
+                  className="mt-1.5 h-10 w-full rounded-lg border border-[#F5B800]/40 bg-black/45 px-3 text-center text-[14px] tracking-[.3em] text-white placeholder:text-[10px] placeholder:tracking-normal placeholder:text-white/25" />
+                <button onClick={() => saveExistingHolder(mine[0]!.id)} disabled={busy || accountHolder.trim().length < 2 || !/^\d{4,6}$/.test(holderPin)}
+                  className="gold-btn mt-2 flex h-10 w-full items-center justify-center gap-1.5 rounded-lg text-[11px]">
+                  {busy ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
+                  {T("Save name for this bound wallet", "বাঁধা ওয়ালেটের নাম সংরক্ষণ করুন")}
+                </button>
+              </div>}
               <p className="mt-0.5 text-[8.5px] leading-snug text-white/45">
                 {T("Your one " + group + " number is permanently bound to this account. It can't be removed, replaced or used by another account.",
                    "আপনার একটি " + group + " নম্বর স্থায়ীভাবে এই অ্যাকাউন্টে বাঁধা। এটি সরানো, বদলানো বা অন্য অ্যাকাউন্টে ব্যবহার করা যাবে না।")}

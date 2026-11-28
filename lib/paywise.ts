@@ -442,9 +442,8 @@ export async function getBalance(): Promise<
 
 /** BD wallet → PayWise payout slug. Only these three are wired for payouts. */
 export const PAYWISE_PAYOUT_SYSTEMS: Record<string, string> = {
-  bKash: "bkash",
-  Nagad: "nagad",
-  Upay: "upay",
+  bKash: "BKASH",
+  Nagad: "NAGAD",
 };
 
 export interface PayoutResult {
@@ -465,44 +464,39 @@ export interface PayoutResult {
  * moves real money, and there is no client-side undo.
  */
 export async function createWithdrawal(opts: {
-  /** Our withdrawal idempotency key — the cashier request id, so retries are safe. */
+  /** Stable per-request idempotency key; retries must reuse this exact value. */
   withdrawalId: string;
   amountCents: number;
   accountNumber: string;
-  /** PayWise's payment_system slug: bkash | nagad | upay. */
+  accountHolder: string;
+  /** PayWise LOCAL BDT bank code: BKASH or NAGAD. */
   paymentSystem: string;
 }): Promise<PayoutResult> {
-  if (!isConfigured()) {
-    return { ok: false, httpStatus: 0, code: "paywise_not_configured", message: "PAYWISE_API_KEY is not set" };
-  }
+  if (!isConfigured()) return { ok: false, httpStatus: 0, code: "paywise_not_configured", message: "PAYWISE_API_KEY is not set" };
+  if (!/^wd_[A-Za-z0-9_-]{5,61}$/.test(opts.withdrawalId)) return { ok: false, httpStatus: 0, code: "INVALID_IDEMPOTENCY_KEY", message: "invalid payout idempotency key" };
+  if (!Number.isInteger(opts.amountCents) || opts.amountCents < 50000) return { ok: false, httpStatus: 0, code: "INVALID_AMOUNT", message: "BDT payout must be at least 500.00 with at most two decimal places" };
+  if (!/^(BKASH|NAGAD)$/.test(opts.paymentSystem) || !opts.accountHolder.trim() || !opts.accountNumber) return { ok: false, httpStatus: 0, code: "INVALID_DESTINATION", message: "supported rail, account number, and account holder are required" };
   const body = {
-    withdrawal_id: opts.withdrawalId,
-    payment_system: opts.paymentSystem.toLowerCase(),
-    amount: Number((opts.amountCents / 100).toFixed(2)),
-    currency_code: "BDT",
+    payment_method: "LOCAL",
+    currency: "BDT",
+    amount: opts.amountCents / 100,
+    bank_code: opts.paymentSystem,
     account_number: opts.accountNumber,
-    label: opts.withdrawalId,
+    account_holder: opts.accountHolder.trim().slice(0, 100),
   };
   try {
-    const r = await call("/withdrawals", { method: "POST", body: JSON.stringify(body) });
-    const data = r.json?.data;
+    const r = await call("/withdrawals", {
+      method: "POST",
+      headers: { "Idempotency-Key": opts.withdrawalId },
+      body: JSON.stringify(body),
+    });
+    const data = r.json?.data ?? r.json?.withdrawal ?? r.json;
     if (r.status >= 200 && r.status < 300 && (r.json?.success ?? true)) {
-      return {
-        ok: true,
-        httpStatus: r.status,
-        withdrawalId: String(data?.withdrawal_id ?? data?.id ?? opts.withdrawalId),
-        status: String(data?.status ?? "requested"),
-      };
+      return { ok: true, httpStatus: r.status, withdrawalId: String(data?.reference ?? data?.id ?? ""), status: String(data?.status ?? "requested") };
     }
-    return {
-      ok: false,
-      httpStatus: r.status,
-      code: r.json?.error?.code || `http_${r.status}`,
-      message: r.json?.error?.message || "PayWise refused the withdrawal",
-    };
+    return { ok: false, httpStatus: r.status, code: r.json?.error?.code || r.json?.code || `http_${r.status}`, message: r.json?.error?.message || r.json?.message || "PayWise refused the withdrawal" };
   } catch (e: any) {
-    // A network failure is ambiguous: the payout may or may not exist. The caller
-    // must treat it as "unknown" and leave the request pending, never as paid.
+    // Ambiguous network failure: do not retry with a new key or mark paid.
     return { ok: false, httpStatus: 0, code: "NETWORK", message: e?.message || "could not reach PayWise" };
   }
 }

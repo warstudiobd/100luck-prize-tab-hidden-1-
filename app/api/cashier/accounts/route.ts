@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
 /** One payout number per gateway: bKash, Nagad, Upay — no second number, ever. */
 export const MAX_ACCOUNTS_PER_CHANNEL = 1;
 
-type Row = { id: number; channel: string; account_number: string; account_holder?: string | null; is_primary: boolean; created_at: string };
+type Row = { id: number; channel: string; account_number: string; account_holder?: string | null; has_account_holder?: boolean; is_primary: boolean; created_at: string };
 
 /** 01711234593 → 01711••••593 (keep the first 5 and last 3 digits). */
 export function maskNumber(n: string): string {
@@ -46,7 +46,7 @@ export async function GET() {
     // Payout rails only (bKash / Nagad / Upay). Any historical row on a collection
     // gateway such as PayWise is not a payout wallet and is never shown or counted.
     const rows = (await query(
-      `SELECT id, channel, account_number, is_primary, created_at
+      `SELECT id, channel, account_number, (NULLIF(trim(account_holder), '') IS NOT NULL) AS has_account_holder, is_primary, created_at
          FROM payout_accounts
         WHERE user_id = $1 AND channel <> 'PayWise'
         ORDER BY is_primary DESC, created_at ASC`,
@@ -61,6 +61,7 @@ export async function GET() {
         channel: r.channel,
         masked: maskNumber(r.account_number),
         last4: r.account_number.replace(/\D/g, "").slice(-4),
+        has_account_holder: Boolean((r as any).has_account_holder),
         is_primary: !!r.is_primary,
         created_at: r.created_at,
       })),
@@ -222,6 +223,22 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const id = Math.trunc(Number(body.id));
   if (!Number.isFinite(id) || id <= 0) return NextResponse.json({ ok: false, error: "id is required" }, { status: 400 });
+
+  if (body.action === "set_holder") {
+    const accountHolder = String(body.account_holder ?? "").trim().replace(/\\s+/g, " ").slice(0, 100);
+    if (accountHolder.length < 2) return NextResponse.json({ ok: false, error: "enter the name registered to this wallet" }, { status: 400 });
+    const pinCheck = await verifyPin(Number(sess.sub), String(body.pin ?? "").trim());
+    if (!pinCheck.ok) return NextResponse.json({ ok: false, error: pinCheck.error, code: pinCheck.code }, { status: pinCheck.code === "pin_locked" ? 429 : pinCheck.code === "pin_wrong" ? 403 : 400 });
+    const saved = await query(
+      `UPDATE payout_accounts SET account_holder = $1
+        WHERE id = $2 AND user_id = $3 AND channel IN ('bKash','Nagad')
+          AND NULLIF(trim(account_holder), '') IS NULL
+        RETURNING id`,
+      [accountHolder, id, sess.sub]
+    );
+    if (!saved.length) return NextResponse.json({ ok: false, error: "wallet not found or account-holder name already set", code: "holder_locked" }, { status: 409 });
+    return NextResponse.json({ ok: true });
+  }
 
   const [row] = (await query("SELECT id, channel FROM payout_accounts WHERE id = $1 AND user_id = $2", [id, sess.sub])) as unknown as Row[];
   if (!row) return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });

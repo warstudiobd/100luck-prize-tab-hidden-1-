@@ -43,6 +43,7 @@ export default function WalletBindView({ showToast, onBack }: {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [maxPer, setMaxPer] = useState(4);
   const [number, setNumber] = useState("");
+  const [accountHolder, setAccountHolder] = useState("");
   const [busy, setBusy] = useState(false);
   const [justAdded, setJustAdded] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -99,6 +100,7 @@ export default function WalletBindView({ showToast, onBack }: {
 
   async function add() {
     if (!valid) return showToast(T("Enter a valid 11-digit wallet number", "সঠিক ১১ ডিজিটের ওয়ালেট নম্বর দিন"));
+    if (["bKash", "Nagad"].includes(group) && accountHolder.trim().length < 2) return showToast(T("Enter the wallet account holder name", "ওয়ালেট অ্যাকাউন্টধারীর নাম লিখুন"));
     if (!/^\d{4,6}$/.test(pin)) return showToast(T("Set a 4–6 digit withdrawal PIN", "৪–৬ ডিজিটের উত্তোলন পিন দিন"));
     // First time: the PIN is created here (and confirmed twice so it cannot be a typo).
     if (pinSet === false && pin !== pin2) return showToast(T("The two PINs do not match", "দুটি পিন মিলছে না"));
@@ -113,7 +115,7 @@ export default function WalletBindView({ showToast, onBack }: {
       }
       const r = await fetch("/api/cashier/accounts", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channel: group, account_number: number, pin }),
+        body: JSON.stringify({ channel: group, account_number: number, account_holder: accountHolder, pin }),
       }).then(r => r.json()).catch(() => null);
       if (!r?.ok) {
         if (r?.code === "pin_wrong" || r?.code === "pin_locked") return showToast(r.error);
@@ -205,6 +207,13 @@ export default function WalletBindView({ showToast, onBack }: {
                   className="w-full border-0 bg-transparent text-[14px] font-bold tabular-nums tracking-wider text-white !shadow-none placeholder:text-[11px] placeholder:font-semibold placeholder:tracking-normal placeholder:text-white/25" />
                 {number && <span className={`ml-1 text-[9px] font-black ${valid ? "text-emerald-400" : "text-red-400"}`}>{number.length}/11</span>}
               </div>
+
+              {(["bKash", "Nagad"].includes(group)) && <>
+                <label className="mt-2 block text-[9px] font-bold uppercase tracking-widest text-white/45">{T("Wallet account holder name", "ওয়ালেট অ্যাকাউন্টধারীর নাম")}</label>
+                <input value={accountHolder} onChange={e => setAccountHolder(e.target.value.slice(0, 100))}
+                  autoComplete="name" placeholder={T("Enter the name registered to this wallet", "ওয়ালেটে নিবন্ধিত নাম লিখুন")}
+                  className="mt-1 h-11 w-full rounded-xl border border-white/12 bg-black/45 px-3 text-[13px] font-semibold text-white placeholder:text-[10px] placeholder:text-white/25" />
+              </>}
 
               {/* withdrawal PIN — created on the first bind, required on every later one */}
               <label className="mt-2 flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest text-white/45">

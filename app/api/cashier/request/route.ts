@@ -55,14 +55,23 @@ async function tryAutoPayout(opts: {
   requestId: number;
   channel: string;
   accountNumber: string;
+  accountHolder: string;
   amountCents: number;
-}): Promise<{ state: "paid" | "over_limit" | "not_enabled" | "failed" | "skipped"; detail?: string }> {
+}): Promise<{ state: "submitted" | "paid" | "over_limit" | "not_enabled" | "failed" | "skipped"; detail?: string }> {
   if (!opts.requestId) return { state: "skipped", detail: "no request id" };
   if (!paywiseConfigured()) return { state: "skipped", detail: "paywise not configured" };
 
   // Only wallets PayWise can actually pay out to.
   const system = PAYWISE_PAYOUT_SYSTEMS[opts.channel];
   if (!system) return { state: "skipped", detail: `${opts.channel} has no payout rail` };
+  if (opts.amountCents < 50000) {
+    await noteHold(opts.requestId, "PayWise LOCAL BDT payouts require at least ৳500");
+    return { state: "over_limit", detail: "PayWise requires payouts of at least ৳500" };
+  }
+  if (!opts.accountHolder.trim()) {
+    await noteHold(opts.requestId, "missing bound wallet account-holder name; update binding before payout");
+    return { state: "skipped", detail: "wallet account-holder name missing" };
+  }
 
   // Admin-tunable ceiling. 0 or a missing row means "never pay out automatically".
   let ceilingCents = 0;
@@ -106,19 +115,25 @@ async function tryAutoPayout(opts: {
   }
 
   const res = await createWithdrawal({
-    withdrawalId: `wd_${opts.requestId}`,
+    withdrawalId: `wd_${String(opts.requestId).padStart(5, "0")}`,
     amountCents: opts.amountCents,
     accountNumber: opts.accountNumber,
+    accountHolder: opts.accountHolder,
     paymentSystem: system,
   });
 
   if (res.ok) {
-    // PAID, not APPROVED: this one means the provider accepted it.
+    // Provider acceptance is not settlement. Keep PENDING until the signed
+    // withdrawal.completed webhook arrives with this exact PWD reference.
+    if (!res.withdrawalId || !/^PWD/i.test(res.withdrawalId)) {
+      await noteHold(opts.requestId, "PayWise accepted request but returned no PWD reference; reconcile manually");
+      return { state: "failed", detail: "missing PayWise withdrawal reference" };
+    }
     await query(
-      "UPDATE cashier_requests SET status = 'PAID', trx_ref = $1 WHERE id = $2",
-      [res.withdrawalId || `wd_${opts.requestId}`, opts.requestId]
-    ).catch(() => {});
-    return { state: "paid", detail: res.withdrawalId };
+      "UPDATE cashier_requests SET trx_ref = $1 WHERE id = $2 AND request_type = 'WITHDRAW' AND status = 'PENDING'",
+      [res.withdrawalId, opts.requestId]
+    );
+    return { state: "submitted", detail: res.withdrawalId };
   }
 
   // Record why, so the admin sees the truth instead of a silent PENDING.
@@ -227,12 +242,15 @@ export async function POST(req: NextRequest) {
   // "ই-ওয়ালেট বাঁধুন" for that gateway. This is the server-side half of the
   // rule — the UI already restricts the picker, but the API is what enforces it.
   let bound: string[] = [];
+  let boundAccountHolder = "";
   try {
     const rows = await query(
-      "SELECT account_number FROM payout_accounts WHERE user_id = $1 AND channel = $2",
+      "SELECT account_number, account_holder FROM payout_accounts WHERE user_id = $1 AND channel = $2",
       [sess.sub, channel]
     );
-    bound = (rows as unknown as { account_number: string }[]).map(r => r.account_number);
+    const payoutAccounts = rows as unknown as { account_number: string; account_holder?: string | null }[];
+    bound = payoutAccounts.map(r => r.account_number);
+    boundAccountHolder = payoutAccounts.find(r => r.account_number === accountRef)?.account_holder || "";
   } catch {
     // Migration not applied → fall back to the old behaviour rather than
     // blocking every payout with a confusing error.
@@ -320,6 +338,7 @@ export async function POST(req: NextRequest) {
     requestId,
     channel,
     accountNumber: accountRef,
+    accountHolder: boundAccountHolder,
     amountCents: amount,
   });
 
@@ -328,8 +347,8 @@ export async function POST(req: NextRequest) {
     request: (outcome as any).request,
     balance_cents: (outcome as any).balance,
     auto_payout: payout.state,
-    message: payout.state === "paid"
-      ? "Withdrawal sent — check your bKash/wallet shortly"
+    message: payout.state === "submitted"
+      ? "Payout request accepted by PayWise — awaiting final confirmation"
       : payout.state === "failed"
         ? "Withdrawal submitted — waiting for admin approval"
         : payout.state === "not_enabled"
